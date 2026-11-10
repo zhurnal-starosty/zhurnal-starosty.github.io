@@ -7,6 +7,7 @@ import * as setupView from './views/setup.js';
 import * as journalView from './views/journal.js';
 import * as settingsView from './views/settings.js';
 import * as studentsView from './views/students.js';
+import * as exportView from './views/export.js';
 
 /** Shared app state, passed to every view. */
 export const state = {
@@ -21,6 +22,7 @@ export const state = {
 const TABS = [
   { route: 'journal', label: 'Журнал', view: journalView },
   { route: 'students', label: 'Студенти', view: studentsView },
+  { route: 'export', label: 'Експорт', view: exportView },
   { route: 'settings', label: 'Налаштування', view: settingsView },
 ];
 

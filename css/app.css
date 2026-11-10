@@ -120,7 +120,7 @@ button.loading::after{
 
 /* ---------- Forms ---------- */
 label{display:block;font-size:13px;color:var(--ink-2);margin-bottom:12px;}
-input[type=text],input[type=email],input[type=password],input[type=search],input[type=tel],input:not([type]),select,textarea{
+input[type=text],input[type=email],input[type=password],input[type=search],input[type=tel],input[type=date],input:not([type]),select,textarea{
   display:block;width:100%;margin-top:4px;
   font-size:14.5px;color:var(--ink);
   padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:#fff;
@@ -327,3 +327,25 @@ tr.editing td.handle::before{display:none;}
 }
 body[data-page=journal] main,body[data-page=journal] .masthead-inner,body[data-page=journal] .toolbar-inner{max-width:none;}
 td.mark.fill-sel{outline:2px solid var(--navy);outline-offset:-2px;background-color:#E3EAF3 !important;}
+
+/* ---------- Export ---------- */
+.export-form h2{margin:0 0 10px;}
+.export-form h2:not(:first-child){margin-top:20px;}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:12px;}
+.seg-item{margin:0;cursor:pointer;}
+.seg-item input{position:absolute;opacity:0;pointer-events:none;}
+.seg-item span{display:block;padding:7px 14px;font-size:14px;color:var(--ink);border-right:1px solid var(--line);background:var(--surface);}
+.seg-item:last-child span{border-right:none;}
+.seg-item input:checked + span{background:var(--navy);color:#fff;}
+.seg-item input:focus-visible + span{outline:2px solid #AFC0D4;outline-offset:-2px;}
+.dates label{flex:0 1 180px;}
+.subjects{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:2px 16px;margin-bottom:16px;}
+.subjects .muted{font-size:13px;}
+.subjects label.check{align-items:flex-start;}
+.subjects label.check input{margin-top:3px;}
+.export-preview{margin-top:18px;}
+.preview-title{margin-bottom:10px;}
+.register-lite td.right,.register-lite th.right{text-align:right;}
+.register-lite td.has-absent{color:var(--absent);font-weight:600;}
+.register-lite td.has-excused{color:var(--excused);font-weight:600;}
+@media (max-width:640px){ .seg-item span{padding:7px 10px;} }
