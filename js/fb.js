@@ -21,7 +21,8 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-auth.languageCode = 'uk';
+// No auth.languageCode: with it Firebase sends its built-in translated email and ignores the template
+// customised in the console (Ukrainian text, action URL to the site). See docs/EMAIL.md.
 export const db = getDatabase(app);
 
 export const r = path => (path ? ref(db, path) : ref(db)); // '' = database root (multi-path updates)
