@@ -8,7 +8,9 @@ const MONTHS = ['січень', 'лютий', 'березень', 'квітен�
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const dmy = s => `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}`;
 const dm = s => `${s.slice(8, 10)}.${s.slice(5, 7)}`;
-const SIGN = { 1: '+', 2: 'н', 3: 'п' }; // paper-journal notation: + був, н не був, п поважна причина
+const SIGN = { 1: '+', 2: '−', 3: '(−)' }; // + був, − не був, (−) не був з поважної причини
+const LEGEND = 'Позначення: + був, − не був, (−) не був з поважної причини';
+const DAY_SHORT = ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
 function presetRange(preset, semester) {
   const now = new Date(), today = iso(now);
@@ -33,8 +35,16 @@ export function buildReport({ schedule, students, marks, groupName, from, to, su
 
   const code = (eid, sid) => { const m = readMark(marks[eid]?.[sid]); return m.s === 2 && m.excused ? 3 : m.s; };
 
-  // Matrix: students × pairs
-  const pairHead = events.map(([, e]) => `${dm(e.date)} ${e.pair || ''} ${e.subject} ${e.type}`.replace(/\s+/g, ' '));
+  // Matrix: students × pairs. Two header rows: the day (once per day) and the pair itself.
+  const pairHead = events.map(([, e]) => `${e.pair || ''} ${e.subject} ${e.type}`.trim().replace(/\s+/g, ' '));
+  const dayLabel = date => `${DAY_SHORT[new Date(date + 'T12:00:00').getDay()]} ${dm(date)}`;
+  const days = []; // [{label, start, span}]
+  events.forEach(([, e], i) => {
+    const last = days[days.length - 1];
+    if (last && last.date === e.date) last.span++;
+    else days.push({ date: e.date, label: dayLabel(e.date), start: i, span: 1 });
+  });
+  const dayHead = events.map((_, i) => days.find(d => d.start === i)?.label || '');
   const matrix = list.map((s, i) => {
     let present = 0, absent = 0, excused = 0;
     const cells = events.map(([eid]) => {
@@ -67,7 +77,7 @@ export function buildReport({ schedule, students, marks, groupName, from, to, su
   }
 
   const title = `Відвідування ${groupName}, ${from === to ? dmy(from) : `${dmy(from)} – ${dmy(to)}`}`;
-  return { title, events, pairHead, matrix, summary, subjList, subjNames: subjList.map(sj => subj[sj]?.name || sj), bySubject, comments };
+  return { title, events, pairHead, dayHead, days, matrix, summary, subjList, subjNames: subjList.map(sj => subj[sj]?.name || sj), bySubject, comments };
 }
 
 let xlsxPromise = null;
@@ -96,17 +106,27 @@ const safeName = s => s.replace(/[\\/:*?"<>|]+/g, '-');
 async function exportXlsx(rep) {
   const XLSX = await loadXLSX();
   const wb = XLSX.utils.book_new();
-  const add = (name, rows, widths) => {
+  const add = (name, rows, widths, merges) => {
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws['!cols'] = widths.map(w => ({ wch: w }));
+    if (merges) ws['!merges'] = merges;
     XLSX.utils.book_append_sheet(wb, ws, name);
   };
+  // Rows 3-4 (index 2-3) are the header: day above, pair below; №, name and totals span both rows.
+  const nP = rep.pairHead.length, H = 2, tail = 2 + nP;
+  const merges = [
+    { s: { r: H, c: 0 }, e: { r: H + 1, c: 0 } },
+    { s: { r: H, c: 1 }, e: { r: H + 1, c: 1 } },
+    ...[0, 1, 2].map(k => ({ s: { r: H, c: tail + k }, e: { r: H + 1, c: tail + k } })),
+    ...rep.days.filter(d => d.span > 1).map(d => ({ s: { r: H, c: 2 + d.start }, e: { r: H, c: 2 + d.start + d.span - 1 } })),
+  ];
   add('Відвідування', [
     [rep.title], [],
-    ['№', 'Прізвище та ім’я', ...rep.pairHead, 'Був', 'Не був', 'з них поважні'],
+    ['№', 'Прізвище та ім’я', ...rep.dayHead, 'Був', 'Не був', 'з них поважні'],
+    ['', '', ...rep.pairHead, '', '', ''],
     ...rep.matrix.map(r => [r.n, r.name, ...r.cells, r.present, r.absent, r.excused]),
-    [], ['Позначення: + був, н не був, п не був з поважної причини'],
-  ], [4, 26, ...rep.pairHead.map(() => 7), 6, 7, 9]);
+    [], [LEGEND],
+  ], [4, 26, ...rep.pairHead.map(h => Math.max(6, h.length + 1)), 6, 7, 13], merges);
   add('Підсумок', [
     [rep.title], [],
     ['№', 'Прізвище та ім’я', 'Пар з відмітками', 'Був', 'Не був', 'з них поважні', 'Присутність, %'],
@@ -134,14 +154,18 @@ body{font-family:'PT Sans',Arial,sans-serif;font-size:12px;color:#1D2530;margin:
 h1{font-size:18px;margin:0 0 4px;} h2{font-size:14px;margin:24px 0 8px;}
 table{border-collapse:collapse;margin-bottom:8px;} th,td{border:1px solid #999;padding:3px 5px;text-align:center;}
 th{background:#EEF0F3;font-weight:bold;} td.name{text-align:left;white-space:nowrap;}
-table.matrix th{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;font-weight:normal;padding:5px 2px;}
-table.matrix th:nth-child(-n+2){writing-mode:horizontal-tb;transform:none;font-weight:bold;}
+table.matrix th.pair{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;font-weight:normal;padding:5px 2px;}
+table.matrix th.day{white-space:nowrap;}
 .note{color:#555;} @media print{body{margin:10mm;} h2{break-before:page;} h2:first-of-type{break-before:auto;}}
 </style></head><body>
 <h1>${esc(rep.title)}</h1>
-<p class="note">Позначення: + був, н не був, п не був з поважної причини. Сформовано ${new Date().toLocaleString('uk-UA')}.</p>
+<p class="note">${LEGEND}. Сформовано ${new Date().toLocaleString('uk-UA')}.</p>
 <h2>Відвідування</h2>
-${table(['№', 'Прізвище та ім’я', ...rep.pairHead, 'Був', 'Не був', 'з них поважні'], rep.matrix.map(r => [r.n, r.name, ...r.cells, r.present, r.absent, r.excused]), 'matrix')}
+<table class="matrix"><thead>
+  <tr><th rowspan="2">№</th><th rowspan="2">Прізвище та ім’я</th>${rep.days.map(d => `<th colspan="${d.span}" class="day">${esc(d.label)}</th>`).join('')}
+    <th rowspan="2">Був</th><th rowspan="2">Не був</th><th rowspan="2">з них поважні</th></tr>
+  <tr>${rep.pairHead.map(h => `<th class="pair">${esc(h)}</th>`).join('')}</tr>
+</thead><tbody>${rep.matrix.map(r => `<tr><td>${r.n}</td><td class="name">${esc(r.name)}</td>${r.cells.map(c => `<td>${esc(c)}</td>`).join('')}<td>${r.present}</td><td>${r.absent}</td><td>${r.excused}</td></tr>`).join('')}</tbody></table>
 <h2>Підсумок</h2>
 ${table(['№', 'Прізвище та ім’я', 'Пар з відмітками', 'Був', 'Не був', 'з них поважні', 'Присутність, %'], rep.summary.map(r => [r.n, r.name, r.marked, r.present, r.absent, r.excused, r.pct ?? '']))}
 <h2>Пропуски за предметами</h2>
@@ -154,7 +178,8 @@ ${rep.comments.length ? `<h2>Причини пропусків</h2>${table(['Д�
 function exportCsv(rep) {
   const q = v => { const s = String(v ?? ''); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const rows = [
-    ['№', 'Прізвище та ім’я', ...rep.pairHead, 'Був', 'Не був', 'з них поважні'],
+    ['№', 'Прізвище та ім’я', ...rep.dayHead, 'Був', 'Не був', 'з них поважні'],
+    ['', '', ...rep.pairHead, '', '', ''],
     ...rep.matrix.map(r => [r.n, r.name, ...r.cells, r.present, r.absent, r.excused]),
   ];
   // ';' + BOM: opens correctly in Excel with Ukrainian regional settings
