@@ -3,7 +3,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/fireba
 import {
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
   signOut, sendPasswordResetEmail, updateProfile, updatePassword, reauthenticateWithCredential,
-  EmailAuthProvider,
+  EmailAuthProvider, verifyPasswordResetCode, confirmPasswordReset,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   getDatabase, ref, get, set, update, remove, onValue, off, push,
@@ -30,6 +30,7 @@ export const read = async path => (await get(r(path))).val();
 export {
   onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
   sendPasswordResetEmail, updateProfile, updatePassword, reauthenticateWithCredential, EmailAuthProvider,
+  verifyPasswordResetCode, confirmPasswordReset,
   set, update, remove, onValue, off, push,
 };
 
@@ -47,6 +48,8 @@ export function errorText(err) {
     'auth/too-many-requests': 'Забагато спроб. Зачекайте кілька хвилин.',
     'auth/network-request-failed': 'Немає з’єднання з інтернетом.',
     'auth/requires-recent-login': 'Для цієї дії потрібно ввести поточний пароль ще раз.',
+    'auth/expired-action-code': 'Посилання застаріло. Запросіть новий лист для відновлення пароля.',
+    'auth/invalid-action-code': 'Посилання недійсне або вже використане. Запросіть новий лист.',
     'PERMISSION_DENIED': 'Немає доступу.',
   };
   if (map[code]) return map[code];

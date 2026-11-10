@@ -8,6 +8,7 @@ import * as journalView from './views/journal.js';
 import * as settingsView from './views/settings.js';
 import * as studentsView from './views/students.js';
 import * as exportView from './views/export.js';
+import * as actionView from './views/action.js';
 
 /** Shared app state, passed to every view. */
 export const state = {
@@ -98,6 +99,18 @@ async function render() {
   currentView = null;
   const { user, profile, group } = state;
   let view, path = route();
+
+  // Links from emails (password reset) come as ?mode=...&oobCode=... and work with or without signing in.
+  const params = new URLSearchParams(location.search);
+  if (params.get('mode') && params.get('oobCode')) {
+    renderShell();
+    document.body.dataset.page = 'action';
+    const host = document.createElement('div');
+    mainEl.replaceChildren(host);
+    currentView = actionView;
+    await actionView.mount(host, { state, go, refreshProfile, params });
+    return;
+  }
 
   if (!user) {
     view = authView;
