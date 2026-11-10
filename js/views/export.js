@@ -9,7 +9,6 @@ const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')
 const dmy = s => `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}`;
 const dm = s => `${s.slice(8, 10)}.${s.slice(5, 7)}`;
 const SIGN = { 1: '+', 2: '−', 3: '(−)' }; // + був, − не був, (−) не був з поважної причини
-const LEGEND = 'Позначення: + був, − не був, (−) не був з поважної причини';
 const DAY_SHORT = ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
 function presetRange(preset, semester) {
@@ -26,14 +25,15 @@ function presetRange(preset, semester) {
 }
 
 /** Builds all export tables for [from, to] and the chosen subjects. */
-export function buildReport({ schedule, students, marks, groupName, from, to, subjects }) {
+export function buildReport({ schedule, students, marks, groupName, from, to, subjects, withExcused = true }) {
   const list = sortedStudents(students);
   const subj = schedule?.subjects || {};
   const events = Object.entries(schedule?.events || {})
     .filter(([id, e]) => e.date >= from && e.date <= to && subjects.has(e.subject) && (!e.removed || marks[id]))
     .sort(([, a], [, b]) => (a.date + a.start).localeCompare(b.date + b.start));
 
-  const code = (eid, sid) => { const m = readMark(marks[eid]?.[sid]); return m.s === 2 && m.excused ? 3 : m.s; };
+  // withExcused=false: an excused absence is just «не був» (−), no separate column or comments.
+  const code = (eid, sid) => { const m = readMark(marks[eid]?.[sid]); return m.s === 2 && m.excused && withExcused ? 3 : m.s; };
 
   // Matrix: students × pairs. Two header rows: the day (once per day) and the pair itself.
   const pairHead = events.map(([, e]) => `${e.pair || ''} ${e.subject} ${e.type}`.trim().replace(/\s+/g, ' '));
@@ -73,11 +73,17 @@ export function buildReport({ schedule, students, marks, groupName, from, to, su
   const comments = [];
   for (const [eid, e] of events) for (const s of list) {
     const m = readMark(marks[eid]?.[s.id]);
-    if (m.s === 2 && (m.excused || m.note)) comments.push({ date: dmy(e.date), pair: `${e.pair || ''} ${e.subject} ${e.type}`.trim(), name: s.name, kind: m.excused ? 'поважна' : 'не був', note: m.note });
+    if (withExcused && m.s === 2 && (m.excused || m.note)) comments.push({ date: dmy(e.date), pair: `${e.pair || ''} ${e.subject} ${e.type}`.trim(), name: s.name, kind: m.excused ? 'поважна' : 'не був', note: m.note });
   }
 
   const title = `Відвідування ${groupName}, ${from === to ? dmy(from) : `${dmy(from)} – ${dmy(to)}`}`;
-  return { title, events, pairHead, dayHead, days, matrix, summary, subjList, subjNames: subjList.map(sj => subj[sj]?.name || sj), bySubject, comments };
+  const legend = withExcused ? 'Позначення: + був, − не був, (−) не був з поважної причини' : 'Позначення: + був, − не був';
+  const totalsHead = withExcused ? ['Був', 'Не був', 'з них поважні'] : ['Був', 'Не був'];
+  const totals = r => (withExcused ? [r.present, r.absent, r.excused] : [r.present, r.absent]);
+  const summaryHead = ['№', 'Прізвище та ім’я', 'Пар з відмітками', ...totalsHead, 'Присутність, %'];
+  const summaryRow = r => [r.n, r.name, r.marked, ...totals(r), r.pct ?? ''];
+  return { title, events, pairHead, dayHead, days, matrix, summary, subjList, subjNames: subjList.map(sj => subj[sj]?.name || sj),
+    bySubject, comments, withExcused, legend, totalsHead, totals, summaryHead, summaryRow };
 }
 
 let xlsxPromise = null;
@@ -117,27 +123,27 @@ async function exportXlsx(rep) {
   const merges = [
     { s: { r: H, c: 0 }, e: { r: H + 1, c: 0 } },
     { s: { r: H, c: 1 }, e: { r: H + 1, c: 1 } },
-    ...[0, 1, 2].map(k => ({ s: { r: H, c: tail + k }, e: { r: H + 1, c: tail + k } })),
+    ...rep.totalsHead.map((_, k) => ({ s: { r: H, c: tail + k }, e: { r: H + 1, c: tail + k } })),
     ...rep.days.filter(d => d.span > 1).map(d => ({ s: { r: H, c: 2 + d.start }, e: { r: H, c: 2 + d.start + d.span - 1 } })),
   ];
   add('Відвідування', [
     [rep.title], [],
-    ['№', 'Прізвище та ім’я', ...rep.dayHead, 'Був', 'Не був', 'з них поважні'],
-    ['', '', ...rep.pairHead, '', '', ''],
-    ...rep.matrix.map(r => [r.n, r.name, ...r.cells, r.present, r.absent, r.excused]),
-    [], [LEGEND],
+    ['№', 'Прізвище та ім’я', ...rep.dayHead, ...rep.totalsHead],
+    ['', '', ...rep.pairHead, ...rep.totalsHead.map(() => '')],
+    ...rep.matrix.map(r => [r.n, r.name, ...r.cells, ...rep.totals(r)]),
+    [], [rep.legend],
   ], [4, 26, ...rep.pairHead.map(h => Math.max(6, h.length + 1)), 6, 7, 13], merges);
   add('Підсумок', [
     [rep.title], [],
-    ['№', 'Прізвище та ім’я', 'Пар з відмітками', 'Був', 'Не був', 'з них поважні', 'Присутність, %'],
-    ...rep.summary.map(r => [r.n, r.name, r.marked, r.present, r.absent, r.excused, r.pct ?? '']),
-  ], [4, 26, 10, 6, 7, 9, 10]);
+    rep.summaryHead,
+    ...rep.summary.map(rep.summaryRow),
+  ], [4, 26, 10, 6, 7, ...(rep.withExcused ? [9] : []), 10]);
   add('За предметами', [
     [`${rep.title}: пропуски за предметами`], [],
     ['№', 'Прізвище та ім’я', ...rep.subjNames],
     ...rep.bySubject.map(r => [r.n, r.name, ...r.counts]),
   ], [4, 26, ...rep.subjNames.map(n => Math.min(30, Math.max(8, n.length)))]);
-  add('Коментарі', [
+  if (rep.withExcused) add('Коментарі', [
     [`${rep.title}: причини пропусків`], [],
     ['Дата', 'Пара', 'Студент', 'Відмітка', 'Коментар'],
     ...rep.comments.map(c => [c.date, c.pair, c.name, c.kind, c.note]),
@@ -159,15 +165,15 @@ table.matrix th.day{white-space:nowrap;}
 .note{color:#555;} @media print{body{margin:10mm;} h2{break-before:page;} h2:first-of-type{break-before:auto;}}
 </style></head><body>
 <h1>${esc(rep.title)}</h1>
-<p class="note">${LEGEND}. Сформовано ${new Date().toLocaleString('uk-UA')}.</p>
+<p class="note">${rep.legend}. Сформовано ${new Date().toLocaleString('uk-UA')}.</p>
 <h2>Відвідування</h2>
 <table class="matrix"><thead>
   <tr><th rowspan="2">№</th><th rowspan="2">Прізвище та ім’я</th>${rep.days.map(d => `<th colspan="${d.span}" class="day">${esc(d.label)}</th>`).join('')}
-    <th rowspan="2">Був</th><th rowspan="2">Не був</th><th rowspan="2">з них поважні</th></tr>
+    ${rep.totalsHead.map(h => `<th rowspan="2">${h}</th>`).join('')}</tr>
   <tr>${rep.pairHead.map(h => `<th class="pair">${esc(h)}</th>`).join('')}</tr>
-</thead><tbody>${rep.matrix.map(r => `<tr><td>${r.n}</td><td class="name">${esc(r.name)}</td>${r.cells.map(c => `<td>${esc(c)}</td>`).join('')}<td>${r.present}</td><td>${r.absent}</td><td>${r.excused}</td></tr>`).join('')}</tbody></table>
+</thead><tbody>${rep.matrix.map(r => `<tr><td>${r.n}</td><td class="name">${esc(r.name)}</td>${r.cells.map(c => `<td>${esc(c)}</td>`).join('')}${rep.totals(r).map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>
 <h2>Підсумок</h2>
-${table(['№', 'Прізвище та ім’я', 'Пар з відмітками', 'Був', 'Не був', 'з них поважні', 'Присутність, %'], rep.summary.map(r => [r.n, r.name, r.marked, r.present, r.absent, r.excused, r.pct ?? '']))}
+${table(rep.summaryHead, rep.summary.map(rep.summaryRow))}
 <h2>Пропуски за предметами</h2>
 ${table(['№', 'Прізвище та ім’я', ...rep.subjNames], rep.bySubject.map(r => [r.n, r.name, ...r.counts]))}
 ${rep.comments.length ? `<h2>Причини пропусків</h2>${table(['Дата', 'Пара', 'Студент', 'Відмітка', 'Коментар'], rep.comments.map(c => [c.date, c.pair, c.name, c.kind, c.note]))}` : ''}
@@ -178,9 +184,9 @@ ${rep.comments.length ? `<h2>Причини пропусків</h2>${table(['Д�
 function exportCsv(rep) {
   const q = v => { const s = String(v ?? ''); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const rows = [
-    ['№', 'Прізвище та ім’я', ...rep.dayHead, 'Був', 'Не був', 'з них поважні'],
-    ['', '', ...rep.pairHead, '', '', ''],
-    ...rep.matrix.map(r => [r.n, r.name, ...r.cells, r.present, r.absent, r.excused]),
+    ['№', 'Прізвище та ім’я', ...rep.dayHead, ...rep.totalsHead],
+    ['', '', ...rep.pairHead, ...rep.totalsHead.map(() => '')],
+    ...rep.matrix.map(r => [r.n, r.name, ...r.cells, ...rep.totals(r)]),
   ];
   // ';' + BOM: opens correctly in Excel with Ukrainian regional settings
   const csv = '﻿' + rows.map(r => r.map(q).join(';')).join('\r\n');
@@ -203,6 +209,9 @@ export async function mount(root, { state }) {
   let [from, to] = presetRange('week');
   const chosen = new Set(allSubjects);
   const now = new Date();
+  const LS_EXC = 'export.withExcused';
+  let withExcused = true;
+  try { withExcused = localStorage.getItem(LS_EXC) !== '0'; } catch { /* storage unavailable */ }
 
   root.innerHTML = `
     <div class="page-head"><h1>Експорт</h1></div>
@@ -221,6 +230,11 @@ export async function mount(root, { state }) {
         <label class="check"><input type="checkbox" name="allSubj" checked> Усі</label>
         ${allSubjects.map(sj => `<label class="check"><input type="checkbox" name="subj" value="${esc(sj)}" checked> ${esc(sj)}<span class="muted">${esc(subjNames[sj]?.name ? ' — ' + subjNames[sj].name : '')}</span></label>`).join('')}
       </div>
+      <h2>Поважні причини</h2>
+      <label class="check"><input type="checkbox" name="withExcused" ${withExcused ? 'checked' : ''}> Враховувати поважні причини</label>
+      <p class="muted exc-hint">${withExcused
+        ? 'Пропуск з поважної причини позначається (−), є стовпчик «з них поважні» і лист з коментарями.'
+        : 'Пропуск з поважної причини рахується як звичайний: − не був.'}</p>
       <div class="form-error" data-err="export"></div>
       <div class="btn-row">
         <button class="primary-btn" data-fmt="xlsx">Завантажити Excel</button>
@@ -234,7 +248,7 @@ export async function mount(root, { state }) {
   const syncDates = () => { fromEl.value = from; toEl.value = to; };
   syncDates();
 
-  const report = () => buildReport({ schedule, students, marks, groupName: state.group.name, from, to, subjects: chosen });
+  const report = () => buildReport({ schedule, students, marks, groupName: state.group.name, from, to, subjects: chosen, withExcused });
 
   function renderPreview() {
     const rep = report();
@@ -244,10 +258,11 @@ export async function mount(root, { state }) {
       <h2 class="preview-title">${esc(rep.title)} <span class="muted">(${rep.events.length} пар)</span></h2>
       <div class="table-wrap">
         <table class="register-lite">
-          <thead><tr><th class="num">№</th><th>Прізвище та ім’я</th><th class="right">Пар з відмітками</th><th class="right">Був</th><th class="right">Не був</th><th class="right">з них поважні</th><th class="right">Присутність</th></tr></thead>
+          <thead><tr><th class="num">№</th><th>Прізвище та ім’я</th><th class="right">Пар з відмітками</th><th class="right">Був</th><th class="right">Не був</th>
+            ${rep.withExcused ? '<th class="right">з них поважні</th>' : ''}<th class="right">Присутність</th></tr></thead>
           <tbody>${rep.summary.map(r => `<tr><td class="num">${r.n}</td><td>${esc(r.name)}</td><td class="right">${r.marked}</td>
             <td class="right">${r.present}</td><td class="right${r.absent ? ' has-absent' : ''}">${r.absent}</td>
-            <td class="right${r.excused ? ' has-excused' : ''}">${r.excused}</td><td class="right">${r.pct == null ? '—' : r.pct + '%'}</td></tr>`).join('')}</tbody>
+            ${rep.withExcused ? `<td class="right${r.excused ? ' has-excused' : ''}">${r.excused}</td>` : ''}<td class="right">${r.pct == null ? '—' : r.pct + '%'}</td></tr>`).join('')}</tbody>
         </table>
       </div>`;
   }
@@ -266,6 +281,13 @@ export async function mount(root, { state }) {
         $('[name=preset][value=custom]', root).checked = true;
         preset = 'custom';
       }
+    }
+    if (t.name === 'withExcused') {
+      withExcused = t.checked;
+      try { localStorage.setItem(LS_EXC, withExcused ? '1' : '0'); } catch { /* storage unavailable */ }
+      $('.exc-hint', root).textContent = withExcused
+        ? 'Пропуск з поважної причини позначається (−), є стовпчик «з них поважні» і лист з коментарями.'
+        : 'Пропуск з поважної причини рахується як звичайний: − не був.';
     }
     if (t.name === 'allSubj') {
       $$('[name=subj]', root).forEach(c => { c.checked = t.checked; });

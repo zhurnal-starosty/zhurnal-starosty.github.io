@@ -349,3 +349,4 @@ td.mark.fill-sel{outline:2px solid var(--navy);outline-offset:-2px;background-co
 .register-lite td.has-absent{color:var(--absent);font-weight:600;}
 .register-lite td.has-excused{color:var(--excused);font-weight:600;}
 @media (max-width:640px){ .seg-item span{padding:7px 10px;} }
+.exc-hint{margin:-4px 0 16px 24px;font-size:13px;}
