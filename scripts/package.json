@@ -1,0 +1,12 @@
+{
+  "name": "pi26-7-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync": "node sync.mjs",
+    "backup": "node backup.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  }
+}

@@ -1,0 +1,63 @@
+name: Sync timetable from CIST
+
+on:
+  schedule:
+    - cron: '17 * * * *'      # every hour at :17 (UTC); GitHub may delay runs
+  workflow_dispatch:
+    inputs:
+      group:
+        description: 'Only this CIST group id (empty = all registered groups)'
+        required: false
+      catalog:
+        description: 'Force catalog refresh'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write               # keepalive step re-enables this workflow
+
+concurrency:
+  group: cist-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: scripts
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Sync
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GROUP: ${{ inputs.group }}
+          CATALOG: ${{ inputs.catalog }}
+        run: |
+          ARGS=""
+          if [ -n "$GROUP" ]; then ARGS="$ARGS --group $GROUP"; fi
+          if [ "$CATALOG" = "true" ]; then ARGS="$ARGS --catalog"; fi
+          node sync.mjs $ARGS
+
+      # GitHub disables scheduled workflows in repos without activity for 60 days.
+      # Re-enabling via the API once a day resets that timer without making commits.
+      - name: Keepalive
+        if: github.event_name == 'schedule' && github.run_attempt == 1
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(date -u +%H)" = "03" ]; then
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/sync.yml/enable" && echo "keepalive ok"
+          fi
