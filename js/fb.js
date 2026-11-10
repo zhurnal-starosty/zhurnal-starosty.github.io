@@ -6,7 +6,7 @@ import {
   EmailAuthProvider,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-  getDatabase, ref, get, set, update, remove, onValue, off,
+  getDatabase, ref, get, set, update, remove, onValue, off, push,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
 const firebaseConfig = {
@@ -30,7 +30,7 @@ export const read = async path => (await get(r(path))).val();
 export {
   onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
   sendPasswordResetEmail, updateProfile, updatePassword, reauthenticateWithCredential, EmailAuthProvider,
-  set, update, remove, onValue, off,
+  set, update, remove, onValue, off, push,
 };
 
 /** Human-readable (Ukrainian) message for Firebase errors. */

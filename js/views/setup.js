@@ -3,21 +3,24 @@
 import { read } from '../fb.js';
 import { $, esc, busy, toast } from '../ui.js';
 import { buildTree, searchGroups, facultyLabel } from '../catalog.js';
-import { claimGroup, joinAsDeputy } from '../group.js';
+import { claimGroup, joinAsDeputy, adminReleaseGroup } from '../group.js';
 
 const LS_FAC = 'setup.faculty';
 
 export async function mount(root, { state, refreshProfile, go }) {
   root.innerHTML = '<div class="loading-page">Завантаження списку груп…</div>';
-  let catalog, taken;
+  let catalog, taken, archives;
   try {
-    [catalog, taken] = await Promise.all([read('catalog'), read('taken')]);
+    [catalog, taken, archives] = await Promise.all([
+      read('catalog'), read('taken'), read(`archives/${state.user.uid}`).catch(() => null),
+    ]);
+    archives ||= {};
   } catch (e) {
     root.innerHTML = `<div class="empty-state"><h2>Не вдалося завантажити список груп</h2><p>${esc(e.message)}</p></div>`;
     return;
   }
   if (!catalog?.faculties) {
-    root.innerHTML = '<div class="empty-state"><h2>Список груп ще не завантажено</h2><p>Він оновлюється з CIST автоматично. Спробуйте за кілька хвилин.</p></div>';
+    root.innerHTML = '<div class="empty-state"><h2>Список груп ще не завантажено</h2><p>Спробуйте за кілька хвилин.</p></div>';
     return;
   }
   taken ||= {};
@@ -30,10 +33,9 @@ export async function mount(root, { state, refreshProfile, go }) {
   root.innerHTML = `
     <div class="setup">
       <div class="setup-head">
-        <h2>Оберіть свою групу</h2>
-        <p class="hint">Вітаємо, ${esc(state.profile.name)}! Знайдіть групу, старостою якої ви є.
-          Розклад для неї підтягнеться з CIST автоматично.${carry ? ` Список студентів (${carry}) буде перенесено в нову групу.` : ''}</p>
-        <input class="search" type="search" placeholder="Пошук: напр. ПІ-26-7" autocomplete="off">
+        <h1>Оберіть групу</h1>
+        ${carry ? `<p class="muted">Список студентів (${carry}) буде перенесено в нову групу.</p>` : ''}
+        <input class="search" type="search" placeholder="Пошук групи" aria-label="Пошук групи" autocomplete="off">
       </div>
       <section class="picked" hidden></section>
       <div class="search-results" hidden></div>
@@ -87,20 +89,21 @@ export async function mount(root, { state, refreshProfile, go }) {
     pickedEl.hidden = !selected;
     if (!selected) return;
     const isTaken = !!taken[selected.id];
+    const archive = archives[selected.id];
     pickedEl.innerHTML = `
       <div class="picked-h">
         <div><div class="picked-name">${esc(selected.name)}</div>
-          <div class="hint">${isTaken ? 'У цієї групи вже є староста.' : 'Група вільна.'}</div></div>
-        <button type="button" class="ghost-btn dark" data-act="cancel">Скасувати</button>
+          <div class="muted">${isTaken ? 'У групи вже є староста' : 'Група вільна'}</div></div>
+        <button type="button" class="secondary-btn" data-act="cancel">Скасувати</button>
       </div>
       ${isTaken ? `
         <form class="deputy-form">
-          <label>Ви заступник старости? Введіть код запрошення від старости
-            <input name="code" placeholder="XXXX-XXXX" autocomplete="off" maxlength="12" required></label>
+          <label>Код заступника<input name="code" autocomplete="off" maxlength="12" required></label>
           <div class="form-error" role="alert"></div>
           <button class="primary-btn" type="submit">Приєднатися як заступник</button>
-          <p class="hint">Якщо групу зайняли помилково чи без вашого відома — зверніться до адміністратора сайту.</p>
-        </form>` : `
+        </form>
+        ${state.isAdmin ? `<div class="admin-box"><button type="button" class="secondary-btn danger" data-act="admin-release">Звільнити групу (адміністратор)</button></div>` : ''}` : `
+        ${archive ? `<label class="check"><input type="checkbox" name="restore" checked> Відновити збережені записи (${new Date(archive.savedAt).toLocaleDateString('uk-UA')})</label>` : ''}
         <div class="form-error" role="alert"></div>
         <button type="button" class="primary-btn" data-act="claim">Я староста групи ${esc(selected.name)}</button>`}`;
     $('input[name=code]', pickedEl)?.focus();
@@ -125,11 +128,22 @@ export async function mount(root, { state, refreshProfile, go }) {
     }
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'cancel') { selected = null; rerenderGroups(); }
+    if (act === 'admin-release') {
+      const btn = e.target.closest('button');
+      if (btn.dataset.confirm !== '1') { btn.dataset.confirm = '1'; btn.textContent = `Звільнити ${selected.name}? Журнал групи буде видалено`; return; }
+      busy(btn, async () => {
+        await adminReleaseGroup(selected.id);
+        taken = (await read('taken')) || {};
+        rerenderGroups();
+        toast(`Групу ${selected.name} звільнено`);
+      }, $('.form-error', pickedEl));
+    }
     if (act === 'claim') {
       const btn = e.target.closest('button');
+      const restore = $('[name="restore"]', pickedEl)?.checked ? archives[selected.id] : null;
       busy(btn, async () => {
         try {
-          await claimGroup(state.user, state.profile, selected.id, selected.name, state.carryStudents);
+          await claimGroup(state.user, state.profile, selected.id, selected.name, { carryStudents: state.carryStudents, restore });
         } catch (err) {
           if (err.code === 'taken') {
             taken = (await read('taken')) || {};
@@ -140,7 +154,7 @@ export async function mount(root, { state, refreshProfile, go }) {
         }
         state.carryStudents = null;
         await refreshProfile();
-        toast(`Готово! Ви староста групи ${selected.name}.`);
+        toast(`Ви староста групи ${selected.name}`);
         go('journal');
       }, $('.form-error', pickedEl));
     }
@@ -154,11 +168,11 @@ export async function mount(root, { state, refreshProfile, go }) {
       try {
         await joinAsDeputy(state.user, state.profile, selected.id, code);
       } catch (err) {
-        if (err.code === 'bad-code') throw { message: 'Неправильний код. Попросіть у старости актуальний код.' };
+        if (err.code === 'bad-code') throw { message: 'Неправильний код.' };
         throw err;
       }
       await refreshProfile();
-      toast(`Готово! Ви заступник старости групи ${selected.name}.`);
+      toast(`Ви заступник старости групи ${selected.name}`);
       go('journal');
     }, $('.form-error', e.target));
   });

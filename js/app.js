@@ -6,6 +6,7 @@ import * as authView from './views/auth.js';
 import * as setupView from './views/setup.js';
 import * as journalView from './views/journal.js';
 import * as settingsView from './views/settings.js';
+import * as studentsView from './views/students.js';
 
 /** Shared app state, passed to every view. */
 export const state = {
@@ -19,6 +20,7 @@ export const state = {
 
 const TABS = [
   { route: 'journal', label: 'Журнал', view: journalView },
+  { route: 'students', label: 'Студенти', view: studentsView },
   { route: 'settings', label: 'Налаштування', view: settingsView },
 ];
 
@@ -49,6 +51,15 @@ export async function refreshProfile() {
     await set(r(`users/${user.uid}`), state.profile);
   }
   state.group = await loadMembership(user, state.profile);
+  if (state.group) {
+    // Role follows the group record (the starosta role may have been handed over).
+    const role = state.group.owner === user.uid ? 'owner' : 'deputy';
+    if (state.profile.role !== role) {
+      state.profile.role = role;
+      const { update } = await import('./fb.js');
+      update(r(`users/${user.uid}`), { role }).catch(() => {});
+    }
+  }
   if (state.profile.groupId && !state.group) {
     // Removed by the starosta or freed by an admin.
     const { update } = await import('./fb.js');
@@ -65,11 +76,11 @@ function renderShell() {
   document.body.classList.toggle('signed-out', !user);
 
   groupTagEl.textContent = inside
-    ? `${group.name} · ${profile.role === 'owner' ? 'староста' : 'заступник'}`
+    ? `${group.name}, ${profile.role === 'owner' ? 'староста' : 'заступник'}`
     : '';
 
   userEl.innerHTML = user
-    ? `<span class="who">${esc(profile?.name || user.email)}</span><button class="ghost-btn" id="logoutBtn">Вийти</button>`
+    ? `<span class="who">${esc(profile?.name || user.email)}</span><button class="header-btn" id="logoutBtn">Вийти</button>`
     : '';
   $('#logoutBtn')?.addEventListener('click', () => signOut(auth));
 
@@ -102,9 +113,13 @@ async function render() {
     view = (tab || TABS[0]).view;
   }
   renderShell();
+  document.body.dataset.page = path; // e.g. the journal uses the full screen width
   currentView = view;
-  mainEl.innerHTML = '';
-  await view.mount(mainEl, { state, go, refreshProfile, path });
+  // Each view gets a fresh container: its event listeners go away with it on the next render.
+  const host = document.createElement('div');
+  host.className = 'view';
+  mainEl.replaceChildren(host);
+  await view.mount(host, { state, go, refreshProfile, path });
 }
 
 window.addEventListener('hashchange', render);

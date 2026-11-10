@@ -33,8 +33,8 @@
     "groups": {
       "$gid": {
         ".read": "auth != null && (data.child('owner').val() === auth.uid || data.child('deputies').child(auth.uid).exists() || root.child('admins').child(auth.uid).exists())",
-        ".write": "auth != null && ((!data.exists() && newData.child('owner').val() === auth.uid && newData.parent().parent().child('taken').child($gid).val() === true) || (data.child('owner').val() === auth.uid && (!newData.exists() || newData.child('owner').val() === auth.uid)) || root.child('admins').child(auth.uid).exists())",
-        ".validate": "newData.hasChildren(['owner', 'name'])",
+        ".write": "auth != null && ((!data.exists() && newData.child('owner').val() === auth.uid && newData.parent().parent().child('taken').child($gid).val() === true) || (data.child('owner').val() === auth.uid && (!newData.exists() || newData.child('owner').val() === auth.uid || data.child('deputies').child(newData.child('owner').val() + '').exists())) || root.child('admins').child(auth.uid).exists())",
+        ".validate": "newData.hasChildren(['owner', 'name']) && !newData.child('deputies').child(newData.child('owner').val() + '').exists()",
         "owner": { ".validate": "newData.isString()" },
         "name": { ".validate": "newData.isString() && newData.val().length <= 40" },
         "claimedAt": { ".validate": "newData.isNumber()" },
@@ -69,6 +69,13 @@
         "role": { ".validate": "newData.val() === 'owner' || newData.val() === 'deputy'" },
         "createdAt": { ".validate": "newData.isNumber()" },
         "$other": { ".validate": false }
+      }
+    },
+
+    "archives": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
       }
     },
 

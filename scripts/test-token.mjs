@@ -13,6 +13,7 @@ if (arg === '--cleanup') {
   const groups = (await db.ref('groups').once('value')).val() || {};
   const u = {};
   for (const uid of Object.keys(users)) if (uid.startsWith('ui-test-')) u[`users/${uid}`] = null;
+  for (const uid of Object.keys((await db.ref('archives').once('value')).val() || {})) if (uid.startsWith('ui-test-')) u[`archives/${uid}`] = null;
   for (const [gid, g] of Object.entries(groups)) {
     if (g.owner?.startsWith('ui-test-')) Object.assign(u, { [`groups/${gid}`]: null, [`taken/${gid}`]: null, [`invites/${gid}`]: null, [`journals/${gid}`]: null });
   }

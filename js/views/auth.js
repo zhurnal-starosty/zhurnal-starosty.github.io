@@ -1,6 +1,6 @@
 // Login / registration / password reset (no app content is visible without signing in).
 import {
-  auth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, updateProfile,
+  auth, r, update, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, updateProfile,
 } from '../fb.js';
 import { $, esc, busy } from '../ui.js';
 
@@ -10,43 +10,34 @@ export function mount(root, { state, path }) {
 
   const forms = {
     login: `
-      <h2>Вхід</h2>
+      <h1>Вхід</h1>
       <label>Email<input name="email" type="email" autocomplete="email" required value="${esc(lastEmail)}"></label>
       <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
       <div class="form-error" role="alert"></div>
       <button class="primary-btn" type="submit">Увійти</button>
       <div class="auth-links">
-        <a href="#/register">Створити акаунт</a>
+        <a href="#/register">Реєстрація</a>
         <a href="#/reset">Забули пароль?</a>
       </div>`,
     register: `
-      <h2>Реєстрація старости</h2>
-      <label>Ім’я та прізвище<input name="name" autocomplete="name" required maxlength="80" placeholder="Андрієнко Артьом"></label>
+      <h1>Реєстрація</h1>
+      <label>Ім’я та прізвище<input name="name" autocomplete="name" required maxlength="80"></label>
       <label>Email<input name="email" type="email" autocomplete="email" required value="${esc(lastEmail)}"></label>
-      <label>Пароль<input name="password" type="password" autocomplete="new-password" required minlength="6" placeholder="мінімум 6 символів"></label>
-      <label>Пароль ще раз<input name="password2" type="password" autocomplete="new-password" required minlength="6"></label>
+      <label>Пароль<input name="password" type="password" autocomplete="new-password" required minlength="6"></label>
+      <label>Повторіть пароль<input name="password2" type="password" autocomplete="new-password" required minlength="6"></label>
       <div class="form-error" role="alert"></div>
       <button class="primary-btn" type="submit">Зареєструватися</button>
-      <p class="hint">Наступним кроком оберете свою групу з розкладу ХНУРЕ.</p>
-      <div class="auth-links"><a href="#/login">Уже маю акаунт</a></div>`,
+      <div class="auth-links"><a href="#/login">Вхід</a></div>`,
     reset: `
-      <h2>Відновлення пароля</h2>
-      <p class="hint">Надішлемо на пошту посилання для створення нового пароля.</p>
+      <h1>Відновлення пароля</h1>
       <label>Email<input name="email" type="email" autocomplete="email" required value="${esc(lastEmail)}"></label>
       <div class="form-error" role="alert"></div>
       <div class="form-ok" role="status"></div>
       <button class="primary-btn" type="submit">Надіслати посилання</button>
-      <div class="auth-links"><a href="#/login">Назад до входу</a></div>`,
+      <div class="auth-links"><a href="#/login">Вхід</a></div>`,
   };
 
-  root.innerHTML = `
-    <div class="auth-page">
-      <div class="auth-intro">
-        <h1>Журнал старости</h1>
-        <p>Облік присутності для старост груп ХНУРЕ. Розклад підтягується з CIST автоматично.</p>
-      </div>
-      <form class="card auth-card" novalidate>${forms[mode]}</form>
-    </div>`;
+  root.innerHTML = `<div class="auth-page"><form class="auth-form" novalidate>${forms[mode]}</form></div>`;
 
   const form = $('form', root);
   const err = $('.form-error', form);
@@ -69,10 +60,13 @@ export function mount(root, { state, path }) {
         if (v.password !== v.password2) throw { message: 'Паролі не збігаються.' };
         state.pendingName = name;
         const cred = await createUserWithEmailAndPassword(auth, email, v.password);
+        // The auth listener may have already created the profile; make sure it has the typed name.
+        await update(r(`users/${cred.user.uid}`), { name, email });
+        if (state.profile && state.user?.uid === cred.user.uid) state.profile.name = name;
         updateProfile(cred.user, { displayName: name }).catch(() => {});
       } else {
         await sendPasswordResetEmail(auth, email);
-        $('.form-ok', form).textContent = `Лист надіслано на ${email}. Перевірте також «Спам».`;
+        $('.form-ok', form).textContent = `Лист надіслано на ${email}.`;
       }
     }, err);
   });

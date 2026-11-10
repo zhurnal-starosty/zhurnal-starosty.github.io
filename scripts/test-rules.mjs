@@ -39,7 +39,7 @@ const deny = (d, p) => expect(d, false, p);
 async function cleanup() {
   const u = {};
   for (const g of [G, G2]) for (const k of ['groups', 'taken', 'invites', 'journals', 'schedules']) u[`${k}/${g}`] = null;
-  for (const id of ['owner', 'deputy', 'stranger', 'owner2']) u[`users/rules-test-${id}`] = null;
+  for (const id of ['owner', 'deputy', 'stranger', 'owner2']) { u[`users/rules-test-${id}`] = null; u[`archives/rules-test-${id}`] = null; }
   await db.ref().update(u);
 }
 
@@ -96,6 +96,23 @@ await allow('owner removes deputy', call(A, 'DELETE', `groups/${G}/deputies/${D.
 await deny('removed deputy reads journal', call(D, 'GET', `journals/${G}`));
 await allow('deputy re-joins', call(D, 'PUT', `groups/${G}/deputies/${D.uid}`, CODE));
 await allow('deputy leaves by himself', call(D, 'DELETE', `groups/${G}/deputies/${D.uid}`));
+
+console.log('transfer of the starosta role');
+await allow('deputy re-joins (for transfer)', call(D, 'PUT', `groups/${G}/deputies/${D.uid}`, CODE));
+await deny('owner hands group to a non-deputy', call(A, 'PATCH', `groups/${G}`, { owner: S.uid }));
+await deny('deputy takes the group himself', call(D, 'PATCH', `groups/${G}`, { owner: D.uid, [`deputies/${D.uid}`]: null }));
+await deny('transfer keeping new owner listed as deputy', call(A, 'PATCH', `groups/${G}`, { owner: D.uid }));
+await allow('owner transfers to deputy and stays as deputy', call(A, 'PATCH', `groups/${G}`, { owner: D.uid, [`deputies/${D.uid}`]: null, [`deputies/${A.uid}`]: 'transfer' }));
+await allow('ex-owner (now deputy) still reads journal', call(A, 'GET', `journals/${G}`));
+await deny('ex-owner can no longer rotate invite', call(A, 'PUT', `invites/${G}`, { code: 'WWWW-WWWW', createdAt: now }));
+await allow('new owner transfers back', call(D, 'PATCH', `groups/${G}`, { owner: A.uid, [`deputies/${A.uid}`]: null }));
+
+console.log('archives');
+await allow('user saves own archive', call(A, 'PUT', `archives/${A.uid}/${G}`, { name: 'ПІ-26-7', savedAt: now, marks: { e1: { s1: 1 } } }));
+await allow('user reads own archive', call(A, 'GET', `archives/${A.uid}`));
+await deny('stranger reads archive', call(S, 'GET', `archives/${A.uid}`));
+await deny('stranger writes archive', call(S, 'PUT', `archives/${A.uid}/x`, 1));
+await allow('user deletes own archive', call(A, 'DELETE', `archives/${A.uid}`));
 
 console.log('users');
 await allow('user writes own profile', call(A, 'PUT', `users/${A.uid}`, { name: 'Owner', email: 'a@x', groupId: G, role: 'owner', createdAt: now }));

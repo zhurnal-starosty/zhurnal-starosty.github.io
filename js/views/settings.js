@@ -1,9 +1,11 @@
-// Settings: profile name, password, group (deputies + invite code), change group.
+// Settings: profile name, password, group (deputies, invite code, hand over / leave), saved records.
 import {
-  auth, read, r, update, updateProfile, updatePassword, reauthenticateWithCredential, EmailAuthProvider,
+  auth, read, r, update, remove, updateProfile, updatePassword, reauthenticateWithCredential, EmailAuthProvider,
 } from '../fb.js';
 import { $, esc, busy, toast, makeCode } from '../ui.js';
-import { leaveGroup, setInvite, removeDeputy } from '../group.js';
+import { setInvite, removeDeputy, releaseGroup, transferGroup, leaveAsDeputy } from '../group.js';
+
+const fmtDate = ts => new Date(ts).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long', year: 'numeric' });
 
 export async function mount(host, { state, refreshProfile, go }) {
   // Fresh container on every (re)mount so old event listeners are dropped with it.
@@ -14,27 +16,29 @@ export async function mount(host, { state, refreshProfile, go }) {
   const gid = profile.groupId;
   const isOwner = profile.role === 'owner';
 
-  let invite = null, members = {};
-  if (isOwner) {
-    [invite, members] = await Promise.all([read(`invites/${gid}`), read(`journals/${gid}/members`)]);
-    members ||= {};
-  }
+  const [invite, membersRaw, archives] = await Promise.all([
+    isOwner ? read(`invites/${gid}`) : null,
+    read(`journals/${gid}/members`).catch(() => null),
+    read(`archives/${user.uid}`).catch(() => null),
+  ]);
+  const members = membersRaw || {};
   const deputyIds = Object.keys(group.deputies || {});
+  const deputyName = uid => members[uid]?.name || 'Заступник';
 
   root.innerHTML = `
     <div class="settings">
-      <section class="card">
-        <h3>Профіль</h3>
+      <section class="panel">
+        <h2>Профіль</h2>
         <form class="row-form" data-form="name">
           <label>Ім’я та прізвище<input name="name" required maxlength="80" value="${esc(profile.name)}"></label>
           <button class="primary-btn" type="submit">Зберегти</button>
         </form>
         <div class="form-error" data-err="name"></div>
-        <p class="hint">Email: <b>${esc(user.email)}</b></p>
+        <p class="muted">Email: ${esc(user.email || '')}</p>
       </section>
 
-      <section class="card">
-        <h3>Пароль</h3>
+      <section class="panel">
+        <h2>Пароль</h2>
         <form class="row-form" data-form="password">
           <label>Поточний пароль<input name="current" type="password" autocomplete="current-password" required></label>
           <label>Новий пароль<input name="next" type="password" autocomplete="new-password" minlength="6" required></label>
@@ -43,33 +47,42 @@ export async function mount(host, { state, refreshProfile, go }) {
         <div class="form-error" data-err="password"></div>
       </section>
 
-      <section class="card">
-        <h3>Група</h3>
-        <p>Ви ${isOwner ? 'староста' : 'заступник старости'} групи <b>${esc(group.name)}</b>.</p>
+      <section class="panel">
+        <h2>Група ${esc(group.name)}</h2>
+        <p>Ви ${isOwner ? 'староста' : 'заступник старости'}.</p>
         ${isOwner ? `
-          <h4>Заступники</h4>
-          <p class="hint">Заступник може так само відмічати присутність і редагувати список студентів.
-            Дайте йому код: він реєструється, обирає групу ${esc(group.name)} і вводить код.</p>
+          <h3>Заступники</h3>
+          <p class="muted">Заступник бачить і редагує журнал. Щоб підключитися, він обирає групу ${esc(group.name)} і вводить код.</p>
           <div class="invite">
             ${invite?.code
-              ? `<code class="invite-code">${esc(invite.code)}</code>
-                 <button class="ghost-btn dark" data-act="copy">Копіювати</button>
-                 <button class="ghost-btn dark" data-act="new-code">Новий код</button>`
-              : `<button class="primary-btn" data-act="new-code">Створити код запрошення</button>`}
+              ? `<span class="invite-code">${esc(invite.code)}</span>
+                 <button class="secondary-btn" data-act="copy">Копіювати</button>
+                 <button class="secondary-btn" data-act="new-code">Новий код</button>`
+              : `<button class="secondary-btn" data-act="new-code">Створити код</button>`}
           </div>
-          ${invite?.code ? '<p class="hint">«Новий код» робить старий недійсним (уже підключені заступники залишаються).</p>' : ''}
-          <ul class="deputies">
+          <table class="simple-table deputies">
             ${deputyIds.length ? deputyIds.map(uid => `
-              <li><span>${esc(members[uid]?.name || 'заступник')}</span>
-                <button class="ghost-btn dark danger" data-act="remove-deputy" data-uid="${esc(uid)}">Відключити</button></li>`).join('')
-              : '<li class="hint">Заступників немає.</li>'}
-          </ul>` : ''}
+              <tr><td>${esc(deputyName(uid))}</td>
+                <td class="right"><button class="secondary-btn danger" data-act="remove-deputy" data-uid="${esc(uid)}" data-name="${esc(deputyName(uid))}">Відключити</button></td></tr>`).join('')
+              : '<tr><td class="muted">Заступників немає</td></tr>'}
+          </table>` : ''}
 
-        <h4>${isOwner ? 'Змінити групу' : 'Вийти з групи'}</h4>
+        <h3>${isOwner ? 'Змінити групу або передати старосту' : 'Вийти з групи'}</h3>
         <div class="leave-box">
-          <button class="ghost-btn dark danger" data-act="leave-ask">${isOwner ? 'Змінити групу…' : 'Вийти з групи…'}</button>
+          <button class="secondary-btn" data-act="leave-ask">${isOwner ? 'Змінити групу' : 'Вийти з групи'}</button>
         </div>
       </section>
+
+      ${archives ? `
+      <section class="panel">
+        <h2>Збережені записи</h2>
+        <p class="muted">Відновлюються, коли ви знову стаєте старостою цієї групи.</p>
+        <table class="simple-table">
+          ${Object.entries(archives).map(([agid, a]) => `
+            <tr><td>${esc(a.name)}</td><td class="muted">збережено ${fmtDate(a.savedAt)}</td>
+              <td class="right"><button class="secondary-btn danger" data-act="del-archive" data-gid="${esc(agid)}" data-name="${esc(a.name)}">Видалити</button></td></tr>`).join('')}
+        </table>
+      </section>` : ''}
     </div>`;
 
   const errOf = k => $(`[data-err="${k}"]`, root);
@@ -87,7 +100,7 @@ export async function mount(host, { state, refreshProfile, go }) {
         await update(r(`journals/${gid}/members/${user.uid}`), { name });
         updateProfile(user, { displayName: name }).catch(() => {});
         await refreshProfile();
-        toast('Ім’я збережено');
+        toast('Збережено');
       }, errOf('name'));
     }
     if (form.dataset.form === 'password') {
@@ -101,6 +114,23 @@ export async function mount(host, { state, refreshProfile, go }) {
     }
   });
 
+  // "Are you sure?" on the same button: first click asks, second click does it.
+  const confirmed = (btn, question) => {
+    if (btn.dataset.confirm === '1') return true;
+    btn.dataset.confirm = '1';
+    btn.textContent = question;
+    return false;
+  };
+
+  root.addEventListener('change', e => {
+    if (e.target.name === 'mode') {
+      const mode = e.target.value;
+      $('.opt-transfer', root)?.toggleAttribute('hidden', mode !== 'transfer');
+      $('.opt-release', root)?.toggleAttribute('hidden', mode !== 'release');
+      $('[data-act="leave"]', root).textContent = mode === 'transfer' ? 'Передати' : `Звільнити групу ${group.name}`;
+    }
+  });
+
   root.addEventListener('click', e => {
     const btn = e.target.closest('[data-act]');
     if (!btn) return;
@@ -110,43 +140,75 @@ export async function mount(host, { state, refreshProfile, go }) {
       navigator.clipboard?.writeText(invite.code).then(() => toast('Код скопійовано'), () => toast(invite.code));
     }
     if (act === 'new-code') {
-      busy(btn, async () => { await setInvite(gid, makeCode()); toast('Код створено'); remount(); });
+      busy(btn, async () => { await setInvite(gid, makeCode()); remount(); });
     }
     if (act === 'remove-deputy') {
-      const name = btn.previousElementSibling.textContent;
-      if (btn.dataset.confirm !== '1') { btn.dataset.confirm = '1'; btn.textContent = `Точно відключити ${name}?`; return; }
+      if (!confirmed(btn, `Відключити ${btn.dataset.name}?`)) return;
       busy(btn, async () => {
         await removeDeputy(gid, btn.dataset.uid);
         await refreshProfile();
-        toast(`${name} більше не має доступу`);
+        toast(`${btn.dataset.name} більше не має доступу`);
         remount();
       });
     }
+    if (act === 'del-archive') {
+      if (!confirmed(btn, 'Видалити назавжди?')) return;
+      busy(btn, async () => { await remove(r(`archives/${user.uid}/${btn.dataset.gid}`)); remount(); });
+    }
     if (act === 'leave-ask') {
       $('.leave-box', root).innerHTML = isOwner ? `
-        <div class="warn">
-          <p><b>Увага.</b> Група ${esc(group.name)} звільниться, її журнал (усі відмітки) буде видалено,
-            ${deputyIds.length ? 'заступники втратять доступ, ' : ''}і ви зможете обрати іншу групу.</p>
-          <label class="check"><input type="checkbox" name="carry" checked> Перенести список студентів у нову групу</label>
+        <div class="leave-form">
+          ${deputyIds.length ? `
+            <label class="radio"><input type="radio" name="mode" value="transfer"> Передати старосту заступнику</label>
+            <div class="opt-transfer sub-options" hidden>
+              <select name="newOwner">${deputyIds.map(uid => `<option value="${esc(uid)}">${esc(deputyName(uid))}</option>`).join('')}</select>
+              <label class="check"><input type="checkbox" name="stay" checked> Залишитися заступником</label>
+              <p class="muted">Журнал і всі записи залишаються в групі.</p>
+            </div>` : ''}
+          <label class="radio"><input type="radio" name="mode" value="release" checked> Звільнити групу</label>
+          <div class="opt-release sub-options">
+            <label class="radio"><input type="radio" name="records" value="keep" checked> Зберегти записи в моєму акаунті</label>
+            <label class="radio"><input type="radio" name="records" value="delete"> Видалити записи</label>
+            <label class="check"><input type="checkbox" name="carry" checked> Перенести список студентів у нову групу</label>
+            ${deputyIds.length ? '<p class="muted">Заступники втратять доступ.</p>' : ''}
+          </div>
           <div class="form-error"></div>
-          <button class="primary-btn danger" data-act="leave">Звільнити групу ${esc(group.name)}</button>
-          <button class="ghost-btn dark" data-act="leave-cancel">Скасувати</button>
+          <div class="btn-row">
+            <button class="primary-btn danger" data-act="leave">Звільнити групу ${esc(group.name)}</button>
+            <button class="secondary-btn" data-act="leave-cancel">Скасувати</button>
+          </div>
         </div>` : `
-        <div class="warn">
-          <p>Ви втратите доступ до журналу групи ${esc(group.name)}. Повернутися можна з новим кодом від старости.</p>
+        <div class="leave-form">
+          <p>Ви втратите доступ до журналу групи ${esc(group.name)}.</p>
           <div class="form-error"></div>
-          <button class="primary-btn danger" data-act="leave">Вийти з групи</button>
-          <button class="ghost-btn dark" data-act="leave-cancel">Скасувати</button>
+          <div class="btn-row">
+            <button class="primary-btn danger" data-act="leave">Вийти з групи</button>
+            <button class="secondary-btn" data-act="leave-cancel">Скасувати</button>
+          </div>
         </div>`;
     }
     if (act === 'leave-cancel') remount();
     if (act === 'leave') {
-      const carry = $('input[name=carry]', root)?.checked;
+      const f = name => $(`[name="${name}"]`, root);
+      const mode = isOwner ? $('[name="mode"]:checked', root).value : 'deputy';
       busy(btn, async () => {
-        const students = await leaveGroup(user, profile);
-        state.carryStudents = carry && students ? students : null;
-        await refreshProfile();
-        go('setup');
+        if (mode === 'transfer') {
+          const newOwner = f('newOwner').value;
+          await transferGroup(user, profile, newOwner, { stayAsDeputy: f('stay').checked });
+          await refreshProfile();
+          toast(`Старостою групи став ${deputyName(newOwner)}`);
+          go(state.group ? 'journal' : 'setup');
+        } else if (mode === 'release') {
+          const keepRecords = $('[name="records"]:checked', root).value === 'keep';
+          const students = await releaseGroup(user, profile, group, { keepRecords });
+          state.carryStudents = f('carry').checked && students ? students : null;
+          await refreshProfile();
+          go('setup');
+        } else {
+          await leaveAsDeputy(user, profile);
+          await refreshProfile();
+          go('setup');
+        }
       }, $('.leave-box .form-error', root));
     }
   });
