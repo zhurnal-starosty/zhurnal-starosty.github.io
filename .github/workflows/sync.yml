@@ -2,7 +2,8 @@ name: Sync timetable from CIST
 
 on:
   schedule:
-    - cron: '17 * * * *'      # every hour at :17 (UTC); GitHub may delay runs
+    - cron: '17 * * * *'      # full sync: every hour at :17 (UTC); GitHub may delay runs
+    - cron: '*/10 * * * *'    # quick: only newly registered groups (no schedule yet)
   workflow_dispatch:
     inputs:
       group:
@@ -44,8 +45,10 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           GROUP: ${{ inputs.group }}
           CATALOG: ${{ inputs.catalog }}
+          SCHEDULE: ${{ github.event.schedule }}
         run: |
           ARGS=""
+          if [ "$SCHEDULE" = "*/10 * * * *" ]; then ARGS="--new-only"; fi
           if [ -n "$GROUP" ]; then ARGS="$ARGS --group $GROUP"; fi
           if [ "$CATALOG" = "true" ]; then ARGS="$ARGS --catalog"; fi
           node sync.mjs $ARGS
@@ -53,7 +56,7 @@ jobs:
       # GitHub disables scheduled workflows in repos without activity for 60 days.
       # Re-enabling via the API once a day resets that timer without making commits.
       - name: Keepalive
-        if: github.event_name == 'schedule' && github.run_attempt == 1
+        if: github.event_name == 'schedule' && github.event.schedule == '17 * * * *'
         working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}

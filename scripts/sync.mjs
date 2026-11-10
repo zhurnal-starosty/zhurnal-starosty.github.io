@@ -2,6 +2,7 @@
 //
 //   node sync.mjs                      catalog (if stale) + every registered group (/groups keys)
 //   node sync.mjs --group 12512017     only these groups (repeatable), registered or not
+//   node sync.mjs --new-only           only registered groups that have no schedule yet (run every 10 min)
 //   node sync.mjs --catalog            force catalog refresh
 //   node sync.mjs --dry-run --out x.json   fetch and diff, write nothing to Firebase
 //
@@ -49,8 +50,22 @@ if (flag('--catalog') || !catalogUpdatedAt || now - catalogUpdatedAt > CATALOG_M
 }
 
 /* ---------- groups ---------- */
+// /scheduleIndex/{gid} = updatedAt — small index so the frequent --new-only run
+// doesn't have to download every schedule.
 let groupIds = values('--group');
-if (!groupIds.length) groupIds = Object.keys((await read('groups')) || {});
+if (!groupIds.length) {
+  const registered = Object.keys((await read('groups')) || {});
+  const index = (await read('scheduleIndex')) || {};
+  if (flag('--new-only')) {
+    groupIds = registered.filter(g => !index[g]);
+  } else {
+    groupIds = registered;
+    // Groups that were freed: drop their schedules.
+    for (const g of Object.keys(index)) {
+      if (!registered.includes(g)) { updates[`schedules/${g}`] = null; updates[`scheduleIndex/${g}`] = null; log(g, 'not registered anymore, schedule removed'); }
+    }
+  }
+}
 log('groups to sync:', groupIds.length ? groupIds.join(', ') : '(none)');
 
 const sem = currentSemester();
@@ -89,8 +104,10 @@ for (const [i, gid] of groupIds.entries()) {
 
     if (h !== prev.hash) {
       updates[`schedules/${gid}`] = { semester: sem, events, subjects: finalSubjects, hash: h, updatedAt: now, checkedAt: now };
+      updates[`scheduleIndex/${gid}`] = now;
     } else {
       updates[`schedules/${gid}/checkedAt`] = now;
+      updates[`scheduleIndex/${gid}`] = prev.updatedAt || now;
       if (prev.error) updates[`schedules/${gid}/error`] = null;
     }
     log(gid, r);

@@ -1,0 +1,88 @@
+{
+  "rules": {
+    "journal_pi267": {
+      ".read": true,
+      ".write": "auth != null && root.child('roles').child(auth.uid).val() === 'editor'"
+    },
+    "roles": {
+      ".read": "auth != null",
+      ".write": false
+    },
+
+    "admins": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid"
+      }
+    },
+
+    "catalog": {
+      ".read": "auth != null"
+    },
+
+    "scheduleIndex": {
+      ".read": false
+    },
+
+    "taken": {
+      ".read": "auth != null",
+      "$gid": {
+        ".write": "auth != null && (newData.exists() ? (newData.val() === true && newData.parent().parent().child('groups').child($gid).child('owner').val() === auth.uid) : (root.child('groups').child($gid).child('owner').val() === auth.uid || root.child('admins').child(auth.uid).exists()))"
+      }
+    },
+
+    "groups": {
+      "$gid": {
+        ".read": "auth != null && (data.child('owner').val() === auth.uid || data.child('deputies').child(auth.uid).exists() || root.child('admins').child(auth.uid).exists())",
+        ".write": "auth != null && ((!data.exists() && newData.child('owner').val() === auth.uid && newData.parent().parent().child('taken').child($gid).val() === true) || (data.child('owner').val() === auth.uid && (!newData.exists() || newData.child('owner').val() === auth.uid)) || root.child('admins').child(auth.uid).exists())",
+        ".validate": "newData.hasChildren(['owner', 'name'])",
+        "owner": { ".validate": "newData.isString()" },
+        "name": { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "claimedAt": { ".validate": "newData.isNumber()" },
+        "deputies": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && (!newData.exists() || newData.val() === root.child('invites').child($gid).child('code').val())",
+            ".validate": "newData.isString() && $uid !== newData.parent().parent().child('owner').val()"
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "invites": {
+      "$gid": {
+        ".read": "auth != null && (root.child('groups').child($gid).child('owner').val() === auth.uid || root.child('groups').child($gid).child('deputies').child(auth.uid).exists() || root.child('admins').child(auth.uid).exists())",
+        ".write": "auth != null && (root.child('groups').child($gid).child('owner').val() === auth.uid || root.child('admins').child(auth.uid).exists())",
+        "code": { ".validate": "newData.isString() && newData.val().length >= 8 && newData.val().length <= 20" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChild('name')",
+        "name": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 80" },
+        "email": { ".validate": "newData.isString() && newData.val().length <= 120" },
+        "groupId": { ".validate": "newData.isString() && newData.val().length <= 20" },
+        "role": { ".validate": "newData.val() === 'owner' || newData.val() === 'deputy'" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "schedules": {
+      "$gid": {
+        ".read": "auth != null && (root.child('groups').child($gid).child('owner').val() === auth.uid || root.child('groups').child($gid).child('deputies').child(auth.uid).exists() || root.child('admins').child(auth.uid).exists())"
+      }
+    },
+
+    "journals": {
+      "$gid": {
+        ".read": "auth != null && (root.child('groups').child($gid).child('owner').val() === auth.uid || root.child('groups').child($gid).child('deputies').child(auth.uid).exists() || root.child('admins').child(auth.uid).exists())",
+        ".write": "auth != null && (root.child('groups').child($gid).child('owner').val() === auth.uid || root.child('groups').child($gid).child('deputies').child(auth.uid).exists() || root.child('admins').child(auth.uid).exists())"
+      }
+    }
+  }
+}
