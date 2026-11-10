@@ -2,7 +2,7 @@
 // and the subject legend (HTML export). All responses are windows-1251.
 
 const BASE = 'https://cist.nure.ua/ias/app/tt/';
-const UA = 'pi26-7-journal-sync (+https://github.com/phskrpp/pi26-7)';
+const UA = 'zhurnal-starosty-sync (+https://github.com/zhurnal-starosty/zhurnal-starosty.github.io)';
 
 // Standard NURE pair start times -> pair number
 const PAIR_BY_START = {
