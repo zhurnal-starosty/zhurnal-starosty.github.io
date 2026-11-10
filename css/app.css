@@ -20,7 +20,7 @@
   --today:#FFF9EA;
   --today-line:#E2B33C;
   --r:3px;
-  --font:'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font:'PT Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
@@ -326,3 +326,4 @@ tr.editing td.handle::before{display:none;}
   .sync-info{width:100%;}
 }
 body[data-page=journal] main,body[data-page=journal] .masthead-inner,body[data-page=journal] .toolbar-inner{max-width:none;}
+td.mark.fill-sel{outline:2px solid var(--navy);outline-offset:-2px;background-color:#E3EAF3 !important;}

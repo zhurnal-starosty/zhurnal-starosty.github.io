@@ -1,6 +1,6 @@
 // Journal: weekly register, students × pairs (from CIST). Click a cell: empty -> був -> не був -> empty.
 // Right click / long press (or click on an excused mark) opens a small panel for «поважна причина» + comment.
-import { r, onValue, off, set, update } from '../fb.js';
+import { r, onValue, off, update } from '../fb.js';
 import { $, esc, toast } from '../ui.js';
 import { sortedStudents } from '../students.js';
 
@@ -42,12 +42,12 @@ export function mount(root, { state }) {
       .sort(([, a], [, b]) => (a.date + a.start).localeCompare(b.date + b.start));
   }
 
-  function cellHtml(eid, sid) {
+  function cellHtml(eid, sid, ri, ci) {
     const m = readMark(marks?.[eid]?.[sid]);
     const cls = m.s === 1 ? 'm-present' : m.s === 2 ? (m.excused ? 'm-excused' : 'm-absent') : 'm-none';
     const sign = m.s === 1 ? '✓' : m.s === 2 ? (m.excused ? 'п' : '✗') : '';
     const title = m.s === 2 ? (m.excused ? 'Поважна причина' : 'Не був') + (m.note ? ': ' + m.note : '') : m.s === 1 ? 'Був' : '';
-    return `<td class="mark ${cls}${m.note ? ' has-note' : ''}" data-eid="${esc(eid)}" data-sid="${esc(sid)}" title="${esc(title)}">${sign}</td>`;
+    return `<td class="mark ${cls}${m.note ? ' has-note' : ''}" data-eid="${esc(eid)}" data-sid="${esc(sid)}" data-r="${ri}" data-c="${ci}" title="${esc(title)}">${sign}</td>`;
   }
 
   function render() {
@@ -100,11 +100,11 @@ export function mount(root, { state }) {
       `<th class="quick${dayClass(d.date)}"><button class="text-btn" data-all="${esc(eid)}">усі присутні</button></th>`)).join('');
 
     const body = list.map((s, i) => {
-      let absent = 0, excused = 0;
+      let absent = 0, excused = 0, ci = 0;
       const cells = days.flatMap(d => d.events.map(([eid]) => {
         const m = readMark(marks?.[eid]?.[s.id]);
         if (m.s === 2) { absent++; if (m.excused) excused++; }
-        return cellHtml(eid, s.id).replace('class="mark', `class="mark${dayClass(d.date)}`);
+        return cellHtml(eid, s.id, i, ci++).replace('class="mark', `class="mark${dayClass(d.date)}`);
       })).join('');
       return `<tr><td class="num">${i + 1}</td><td class="name">${esc(s.name)}</td>${cells}
         <td class="total${absent ? ' has-absent' : ''}">${absent}</td><td class="total${excused ? ' has-excused' : ''}">${excused}</td></tr>`;
@@ -126,7 +126,8 @@ export function mount(root, { state }) {
         <span><i class="lg m-present">✓</i> був</span>
         <span><i class="lg m-absent">✗</i> не був</span>
         <span><i class="lg m-excused">п</i> поважна причина</span>
-        <span class="muted">Клік змінює відмітку. Права кнопка миші або довге натискання — поважна причина й коментар.</span>
+        <span class="muted">Клік змінює відмітку; затисніть і протягніть — заповнити кілька клітинок; Ctrl+Z — скасувати.
+          Права кнопка миші або довге натискання — поважна причина й коментар.</span>
       </div>`;
     if (panel) openPanel(panel.eid, panel.sid);
   }
@@ -137,16 +138,118 @@ export function mount(root, { state }) {
     return iso(d) === iso(now) ? `сьогодні о ${t}` : `${d.toLocaleDateString('uk-UA')} о ${t}`;
   }
 
-  /* ---------- writes ---------- */
-  const markPath = (eid, sid) => `journals/${gid}/marks/${eid}/${sid}`;
-  const saveMark = (eid, sid, m) => set(r(markPath(eid, sid)), writeMark(m)).catch(e => toast(e.message, 'error'));
+  /* ---------- writes with undo / redo ---------- */
+  // Every change goes through applyChanges({ 'eid/sid': value|null }) so Ctrl+Z can restore the previous values.
+  const undoStack = [], redoStack = [];
+  const rawMark = (eid, sid) => marks?.[eid]?.[sid] ?? null;
+  const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+  function writeRaw(changes) {
+    return update(r(`journals/${gid}/marks`), changes).catch(e => toast(e.message, 'error'));
+  }
+
+  function applyChanges(changes) {
+    const before = {}, after = {};
+    for (const [path, value] of Object.entries(changes)) {
+      const [eid, sid] = path.split('/');
+      const old = rawMark(eid, sid);
+      if (same(old, value)) continue;
+      before[path] = old;
+      after[path] = value ?? null;
+    }
+    if (!Object.keys(after).length) return;
+    undoStack.push({ before, after });
+    if (undoStack.length > 200) undoStack.shift();
+    redoStack.length = 0;
+    writeRaw(after);
+  }
+
+  function undo() {
+    const op = undoStack.pop();
+    if (!op) { toast('Немає дій для скасування'); return; }
+    redoStack.push(op);
+    writeRaw(op.before);
+    const n = Object.keys(op.before).length;
+    toast(n > 1 ? `Скасовано (${n} клітинок)` : 'Скасовано');
+  }
+
+  function redo() {
+    const op = redoStack.pop();
+    if (!op) return;
+    undoStack.push(op);
+    writeRaw(op.after);
+    toast('Повернуто');
+  }
+
+  const saveMark = (eid, sid, m) => applyChanges({ [`${eid}/${sid}`]: writeMark(m) });
 
   function cycle(td) {
     const { eid, sid } = td.dataset;
-    const m = readMark(marks?.[eid]?.[sid]);
+    const m = readMark(rawMark(eid, sid));
     if (m.excused || m.note) { openPanel(eid, sid); return; }
     saveMark(eid, sid, { s: (m.s + 1) % 3 });
   }
+
+  /* ---------- drag to fill (like Excel) ---------- */
+  // Press on a cell, drag over others (any direction): on release every cell in the rectangle
+  // gets the value of the first cell. Mouse/pen only; on touch screens dragging scrolls the table.
+  let drag = null, suppressClick = false;
+  const cellsIn = (r0, c0, r1, c1) => {
+    const [ra, rb] = [Math.min(r0, r1), Math.max(r0, r1)], [ca, cb] = [Math.min(c0, c1), Math.max(c0, c1)];
+    return [...root.querySelectorAll('td.mark')].filter(td => {
+      const rr = +td.dataset.r, cc = +td.dataset.c;
+      return rr >= ra && rr <= rb && cc >= ca && cc <= cb;
+    });
+  };
+  function paintDrag() {
+    root.querySelectorAll('td.fill-sel').forEach(td => td.classList.remove('fill-sel'));
+    if (drag?.moved) cellsIn(drag.r0, drag.c0, drag.r1, drag.c1).forEach(td => td.classList.add('fill-sel'));
+  }
+
+  root.addEventListener('pointerdown', e => {
+    const td = e.target.closest('td.mark');
+    if (!td || e.button !== 0 || e.pointerType === 'touch') return;
+    e.preventDefault(); // no text selection while dragging
+    const { eid, sid } = td.dataset;
+    drag = { r0: +td.dataset.r, c0: +td.dataset.c, r1: +td.dataset.r, c1: +td.dataset.c, value: rawMark(eid, sid), moved: false };
+  });
+  const onMove = e => {
+    if (!drag) return;
+    if (!(e.buttons & 1)) { drag = null; paintDrag(); return; }
+    const td = document.elementFromPoint(e.clientX, e.clientY)?.closest('td.mark');
+    if (!td || !root.contains(td)) return;
+    const r1 = +td.dataset.r, c1 = +td.dataset.c;
+    if (r1 === drag.r1 && c1 === drag.c1) return;
+    drag.r1 = r1; drag.c1 = c1;
+    drag.moved = drag.moved || r1 !== drag.r0 || c1 !== drag.c0;
+    paintDrag();
+  };
+  const onUp = () => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    paintDrag();
+    if (!d.moved) return; // plain click: handled by the click listener
+    suppressClick = true;
+    setTimeout(() => { suppressClick = false; }, 0);
+    const value = d.value == null ? null : JSON.parse(JSON.stringify(d.value));
+    const changes = {};
+    for (const td of cellsIn(d.r0, d.c0, d.r1, d.c1)) changes[`${td.dataset.eid}/${td.dataset.sid}`] = value;
+    applyChanges(changes);
+  };
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+  unsubs.push(() => { document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); });
+
+  // Ctrl+Z / Ctrl+Y (by physical key, so it works with the Ukrainian layout too)
+  const onKey = e => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+    if (e.code === 'KeyZ' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey)) { e.preventDefault(); redo(); }
+  };
+  document.addEventListener('keydown', onKey);
+  unsubs.push(() => document.removeEventListener('keydown', onKey));
 
   /* ---------- excused panel (inline, anchored to the cell) ---------- */
   function closePanel() { panel = null; $('.mark-panel', root)?.remove(); }
@@ -206,12 +309,12 @@ export function mount(root, { state }) {
     if (all) {
       const eid = all.dataset.all;
       const u = {};
-      for (const sid of Object.keys(students || {})) if (!marks?.[eid]?.[sid]) u[sid] = 1;
-      if (Object.keys(u).length) update(r(`journals/${gid}/marks/${eid}`), u).catch(err => toast(err.message, 'error'));
+      for (const sid of Object.keys(students || {})) if (!rawMark(eid, sid)) u[`${eid}/${sid}`] = 1;
+      applyChanges(u);
       return;
     }
     const td = e.target.closest('td.mark');
-    if (td) { if (panel) closePanel(); cycle(td); return; }
+    if (td) { if (suppressClick) return; if (panel) closePanel(); cycle(td); return; }
     if (panel) closePanel();
   });
 
