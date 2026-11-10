@@ -56,8 +56,12 @@ export function parseLine(line) {
     if (!cell) continue;
     if (!nameParts.length) nameParts.push(cell); else noteParts.push(cell);
   }
-  let name = (nameParts[0] || '')
-    .replace(/^\s*\d{1,3}\s*[.)\-–]?\s+/, '') // leading numbering "1." / "1)" / "1 -"
+  let name = (nameParts[0] || '').replace(/^\s*\d{1,3}\s*[.)\-–]?\s+/, ''); // leading numbering "1." / "1)" / "1 -"
+  // Text in brackets goes to the note: "Іванов Іван (староста)" -> note "староста"; empty brackets are dropped.
+  const bracketed = [];
+  name = name.replace(/[([{]\s*([^)\]}]*?)\s*[)\]}]/g, (_, inner) => { if (inner.trim()) bracketed.push(inner.trim()); return ' '; });
+  noteParts.unshift(...bracketed);
+  name = name
     .replace(/[\s,;:\-–—]+$/, '')
     .replace(/\s+/g, ' ')
     .trim();

@@ -49,62 +49,89 @@ export function mount(root, { state }) {
     </tr>`;
   }
 
-  function importPanel() {
-    if (!importOpen) return '';
+  // The page has three independent parts so typing in the import box never re-creates it
+  // (re-rendering the textarea used to reset its scroll position and size).
+  function skeleton() {
+    root.innerHTML = `
+      <div class="page-head">
+        <h1>Студенти<span class="count"></span></h1>
+        <div class="btn-row">
+          <button class="primary-btn" data-act="add">Додати студента</button>
+          <button class="secondary-btn" data-act="import-open">Імпорт списку</button>
+          <button class="secondary-btn" data-act="sort">За алфавітом</button>
+        </div>
+      </div>
+      <div class="import-host"></div>
+      <div class="list-host"></div>`;
+  }
+
+  function renderImport() {
+    const host = $('.import-host', root);
+    if (!importOpen) { host.innerHTML = ''; return; }
+    if (!$('.import-panel', host)) {
+      host.innerHTML = `
+        <section class="panel import-panel">
+          <h2>Імпорт списку</h2>
+          <label>Один студент на рядок; Telegram і телефон можна дописати в тому ж рядку
+            <textarea name="importText" rows="8" spellcheck="false"></textarea></label>
+          <div class="btn-row">
+            <label class="file-btn secondary-btn">Завантажити Excel або CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" hidden></label>
+          </div>
+          <div class="import-preview"></div>
+          <div class="form-error" data-err="import"></div>
+          <div class="btn-row">
+            <button class="primary-btn" data-act="import-apply" disabled>Додати</button>
+            <button class="secondary-btn" data-act="import-close">Скасувати</button>
+          </div>
+        </section>`;
+    }
+    renderPreview();
+  }
+
+  function renderPreview() {
+    const panel = $('.import-panel', root);
+    if (!panel) return;
     const fresh = importRows.filter(x => !x.exists);
-    return `
-      <section class="panel import-panel">
-        <h2>Імпорт списку</h2>
-        <label>Один студент на рядок; Telegram і телефон можна дописати в тому ж рядку
-          <textarea name="importText" rows="8" spellcheck="false"></textarea></label>
-        <div class="btn-row">
-          <label class="file-btn secondary-btn">Завантажити Excel або CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" hidden></label>
-        </div>
-        ${importRows.length ? `
-          <table class="register-lite preview">
-            <thead><tr><th>Стан</th><th>Прізвище та ім’я</th><th>Telegram</th><th>Телефон</th><th>Примітка</th></tr></thead>
-            <tbody>${importRows.map(x => `<tr class="${x.exists ? 'dim' : ''}">
-              <td>${x.exists ? 'вже є' : 'новий'}</td><td>${esc(x.name)}</td><td>${x.tg ? '@' + esc(x.tg) : ''}</td>
-              <td class="nowrap">${esc(formatPhone(x.phone))}</td><td>${esc(x.note)}</td></tr>`).join('')}</tbody>
-          </table>` : ''}
-        <div class="form-error" data-err="import"></div>
-        <div class="btn-row">
-          <button class="primary-btn" data-act="import-apply" ${fresh.length ? '' : 'disabled'}>${fresh.length ? `Додати ${fresh.length}` : 'Додати'}</button>
-          <button class="secondary-btn" data-act="import-close">Скасувати</button>
-        </div>
-      </section>`;
+    $('.import-preview', panel).innerHTML = importRows.length ? `
+      <table class="register-lite preview">
+        <thead><tr><th>Стан</th><th>Прізвище та ім’я</th><th>Telegram</th><th>Телефон</th><th>Примітка</th></tr></thead>
+        <tbody>${importRows.map(x => `<tr class="${x.exists ? 'dim' : ''}">
+          <td>${x.exists ? 'вже є' : 'новий'}</td><td>${esc(x.name)}</td><td>${x.tg ? '@' + esc(x.tg) : ''}</td>
+          <td class="nowrap">${esc(formatPhone(x.phone))}</td><td>${esc(x.note)}</td></tr>`).join('')}</tbody>
+      </table>` : '';
+    const btn = $('[data-act=import-apply]', panel);
+    btn.disabled = !fresh.length;
+    btn.textContent = fresh.length ? `Додати ${fresh.length}` : 'Додати';
+  }
+
+  function renderList() {
+    const host = $('.list-host', root);
+    const rows = list.map((s, i) => (editing === s.id ? rowEdit(s, i) : rowView(s, i)));
+    if (editing === 'new') rows.push(rowEdit({ id: 'new' }, list.length));
+    host.innerHTML = list.length || editing === 'new' ? `
+      <div class="table-wrap">
+        <table class="register-lite students">
+          <thead><tr><th class="handle"></th><th class="num">№</th><th>Прізвище та ім’я</th><th>Telegram</th><th>Телефон</th><th>Примітка</th><th></th></tr></thead>
+          <tbody>${rows.join('')}</tbody>
+        </table>
+      </div>
+      <div class="form-error" data-err="row"></div>`
+      : (importOpen ? '' : `<div class="empty-state"><h2>Список порожній</h2>
+          <p>Додайте студентів по одному або вставте весь список через «Імпорт списку».</p></div>`);
+    const first = $('tr.editing input', host);
+    if (first) { first.focus(); first.setSelectionRange(first.value.length, first.value.length); }
   }
 
   function render() {
     if (list === null) { root.innerHTML = '<div class="loading-page">Завантаження…</div>'; return; }
-    const textBefore = $('[name=importText]', root)?.value;
-    const rows = list.map((s, i) => (editing === s.id ? rowEdit(s, i) : rowView(s, i)));
-    if (editing === 'new') rows.push(rowEdit({ id: 'new' }, list.length));
-
-    root.innerHTML = `
-      <div class="page-head">
-        <h1>Студенти<span class="count">${list.length}</span></h1>
-        <div class="btn-row">
-          <button class="primary-btn" data-act="add">Додати студента</button>
-          <button class="secondary-btn" data-act="import-open">Імпорт списку</button>
-          <button class="secondary-btn" data-act="sort" ${list.length > 1 ? '' : 'disabled'}>За алфавітом</button>
-        </div>
-      </div>
-      ${importPanel()}
-      ${list.length || editing === 'new' ? `
-        <div class="table-wrap">
-          <table class="register-lite students">
-            <thead><tr><th class="handle"></th><th class="num">№</th><th>Прізвище та ім’я</th><th>Telegram</th><th>Телефон</th><th>Примітка</th><th></th></tr></thead>
-            <tbody>${rows.join('')}</tbody>
-          </table>
-        </div>
-        <div class="form-error" data-err="row"></div>`
-      : (importOpen ? '' : `<div class="empty-state"><h2>Список порожній</h2>
-          <p>Додайте студентів по одному або вставте весь список через «Імпорт списку».</p></div>`)}`;
-
-    if (textBefore != null && $('[name=importText]', root)) $('[name=importText]', root).value = textBefore;
-    const first = $('tr.editing input', root);
-    if (first) { first.focus(); first.setSelectionRange(first.value.length, first.value.length); }
+    if (!$('.list-host', root)) skeleton();
+    $('.page-head .count', root).textContent = list.length;
+    $('[data-act=sort]', root).disabled = list.length < 2;
+    // "вже є" flags depend on the current list
+    const ta = $('[name=importText]', root);
+    if (importOpen && ta) importRows = parseList(ta.value, list);
+    renderImport();
+    renderList();
     pendingRemote = false;
   }
 
@@ -166,7 +193,10 @@ export function mount(root, { state }) {
       const coll = new Intl.Collator('uk', { sensitivity: 'base' });
       writeOrder([...list].sort((a, b) => coll.compare(a.name, b.name)).map(s => s.id)).catch(err => toast(err.message, 'error'));
     }
-    if (act === 'import-open') { importOpen = true; importRows = []; render(); $('[name=importText]', root)?.focus(); }
+    if (act === 'import-open') {
+      if (!importOpen) { importOpen = true; importRows = []; render(); }
+      $('[name=importText]', root)?.focus();
+    }
     if (act === 'import-close') { importOpen = false; importRows = []; render(); }
     if (act === 'import-apply') {
       busy(btn, async () => {
@@ -198,23 +228,24 @@ export function mount(root, { state }) {
     clearTimeout(parseTimer);
     parseTimer = setTimeout(() => {
       importRows = parseList(e.target.value, list);
-      const pos = e.target.selectionStart;
-      render();
-      const ta = $('[name=importText]', root);
-      ta.focus(); ta.setSelectionRange(pos, pos);
-    }, 300);
+      renderPreview(); // only the preview table changes; the textarea stays as it is
+    }, 250);
   });
 
   root.addEventListener('change', async e => {
     if (e.target.type !== 'file' || !e.target.files[0]) return;
+    const err = $('[data-err=import]', root);
+    err.textContent = '';
     try {
       const text = await fileToText(e.target.files[0]);
-      importRows = parseList(text, list);
-      render();
       $('[name=importText]', root).value = text;
-      if (!importRows.length) $('[data-err=import]', root).textContent = 'У файлі не знайдено імен.';
-    } catch (err) {
-      $('[data-err=import]', root).textContent = err.message;
+      importRows = parseList(text, list);
+      renderPreview();
+      if (!importRows.length) err.textContent = 'У файлі не знайдено імен.';
+    } catch (ex) {
+      err.textContent = ex.message;
+    } finally {
+      e.target.value = ''; // allow choosing the same file again
     }
   });
 
